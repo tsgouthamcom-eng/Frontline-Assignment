@@ -135,6 +135,70 @@ delayed-answer, rejection, and no-answer tests.
   was found. The API-surface mock in the P0 test is still a material test-quality
   issue.
 
+### Requested reproducible validation evidence
+
+Please append the following to the PR description, a follow-up commit message,
+or the CI summary after running them against this exact head. Include tool
+versions, the complete commands, and pass/fail totals rather than only a
+statement that tests passed:
+
+```bash
+cd voice-agent
+python -m pytest ../shared/tests -v --tb=short
+python -m pytest tests -v --tb=short
+python -m ruff check .
+python -m black --check .
+```
+
+`ruff` and `black` are not repository-mandated tools in the inspected files, so
+their output is supplementary consistency evidence rather than a newly imposed
+style gate. If either tool is not part of the development image, record the
+version used to install it before running the command. The review environment
+does not contain the checkout, so these commands could not be executed here.
+
+## LiveKit/Telnyx integration-practice assessment
+
+### Practices the implementation follows
+
+- **Webhook authenticity before routing:** `livekit_ingress.py:65-85` requires
+  the authorization header and sends the exact raw UTF-8 request body to the
+  LiveKit verifier before parsing. This follows LiveKit's signed-webhook model,
+  including the body-hash validation performed by `WebhookReceiver`.
+- **Inbound-SIP contract validation:** `livekit_ingress.py:108-145` restricts
+  accepted events to SIP `participant_joined` events and requires room,
+  participant, call, trunk, dispatch-rule, and dialed-number identifiers. That
+  is a good defensive boundary and makes call/provider correlation practical.
+- **Warm-transfer lifecycle controls:** the orchestrator serializes transfer and
+  handoff attempts, waits for an answered broker and Room2 readiness, verifies
+  arrival in Room1, and has bounded timeout/cleanup paths. This aligns with the
+  agent-assisted warm-transfer model in LiveKit's telephony guidance.
+- **Provider configuration:** the application keeps LiveKit API credentials and
+  SIP identifiers in typed configuration, while the documentation keeps Telnyx
+  credentials in provider setup rather than application environment examples.
+
+### Gaps requiring release qualification or follow-up
+
+- **Provider integration has not been qualified:** LiveKit recommends a real
+  development call covering inbound/outbound trunk routing, dispatch-rule
+  matching, SIP participant attributes, provider-side logs, and failure paths.
+  Offline tests cannot establish those properties. This is an unresolved release
+  qualification requirement, not a claim that the code is already broken.
+- **Failure-path acceptance evidence is missing:** LiveKit specifically calls
+  for pre-answer reject/no-answer and mid-call-disconnect checks. Add the output
+  of those development-environment tests once authorized; test the transfer
+  failure/restore path as well as successful inbound and outbound calls.
+- **Operational observability:** add telemetry around the interval from primary
+  media gating to the hold publisher's first audio frame. The current ordering
+  gates caller media before `start_hold()` completes, so a provider or join
+  delay can create an audible silence. This is a non-blocking reliability and
+  UX recommendation, not a verified defect.
+- **Participant-ID semantics after move:** confirm with the pinned LiveKit
+  version whether a SIP participant SID is preserved after `MoveParticipant`.
+  The code retains the Room2 participant ID to process later Room1 disconnects.
+  If IDs can change across rooms, a broker departure can be missed. Add a test
+  with different source/destination IDs unless the provider contract guarantees
+  preservation.
+
 ## Non-blocking operational risk / unresolved question
 
 `voice-agent/bot.py:632-646` permits only one active bot task per BotRunner
@@ -152,3 +216,6 @@ the global task with room/call-keyed task management.
 - [Pipecat 0.0.95 BaseInputTransport source](https://raw.githubusercontent.com/pipecat-ai/pipecat/v0.0.95/src/pipecat/transports/base_input.py)
 - [Pinned ingress/outbound handler](https://github.com/e3-solutions/Frontline-Assignment/blob/f93f7a5f79efdf08c18c583a6a6f7167084b93ae/voice-agent/server.py#L98)
 - [LiveKit outbound-call behaviour](https://docs.livekit.io/telephony/making-calls/outbound-calls/)
+- [LiveKit webhook verification](https://docs.livekit.io/intro/basics/rooms-participants-tracks/webhooks-events/)
+- [LiveKit telephony test guidance](https://docs.livekit.io/telephony/testing/)
+- [LiveKit warm-transfer overview](https://docs.livekit.io/telephony/features/transfers/)
